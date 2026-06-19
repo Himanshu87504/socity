@@ -10,7 +10,7 @@ const iconMap = {
 const ALL_NAV = [
     { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },
     { id: 'Accounts', label: 'Accounts', icon: 'FileText' },
-    { id: 'invoice', label: 'Invoice', icon: 'Receipt' },
+    // { id: 'invoice', label: 'Invoice', icon: 'Receipt' },
     { id: 'masters', label: 'Masters', icon: 'Database' },
     { id: 'parent-entity', label: 'Parent Entity', icon: 'GitBranch' },
     { id: 'applications', label: 'Applications', icon: 'AppWindow' },
