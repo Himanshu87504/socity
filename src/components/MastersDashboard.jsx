@@ -729,7 +729,6 @@ function MemberMaster() {
         if (isMember || members.length === 0) {
             fetchMembersDirectly();
         }
-   // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ── Build display name from firstName/middleName/lastName ────
