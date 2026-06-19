@@ -348,7 +348,7 @@ const GenerateInvoiceModal = ({ open, onClose, societiesList, activeSociety, onS
             setWings([]);
             setProperties([]);
         }
-    }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [open]); 
 
     // ── Fetch towers when society changes ─────────────────────────────
     useEffect(() => {
