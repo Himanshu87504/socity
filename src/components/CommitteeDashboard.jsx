@@ -257,7 +257,7 @@ const MemberFormPanel = ({ mode, initial, onClose, onSaved }) => {
             };
             const res = mode === "add"
                 ? await addNewCommiteeMemberApi(payload)
-                : await updateCommiteeMemberApi(payload, initial.id);
+                : await updateCommiteeMemberApi(payload, initial.memberId);
 
             const ok = res?.data?.status === 1 || res?.status === 200 || res?.status === 201;
             if (ok) {
@@ -408,8 +408,8 @@ export default function CommitteeDashboard() {
         if (!window.confirm(`Delete "${member.fullName}"?`)) return;
         setDeleting(member.memberId);
         try {
-            await deleteCommiteeMemberApi(member.id);
-            setCommitteeMembers(prev => prev.filter(m => m.id !== member.id));
+            await deleteCommiteeMemberApi(member.memberId);
+            setCommitteeMembers(prev => prev.filter(m => m.memberId !== member.memberId));
         } catch (e) {
             alert(Array.isArray(e?.response?.data?.message) ? e.response.data.message.join(", ") : e?.response?.data?.message || "Delete failed.");
         } finally { setDeleting(null); }
@@ -433,7 +433,7 @@ export default function CommitteeDashboard() {
         } else {
             // ✅ FIX 2 — edit mode mein tower/wing/property bhi update karo
             setCommitteeMembers(prev => prev.map(m =>
-                m.id === editTarget.id
+                m.memberId === editTarget.memberId
                     ? {
                         ...m,
                         fullName:           data.fullName,
