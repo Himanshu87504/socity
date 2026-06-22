@@ -2,16 +2,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAppContext } from "../AppContext";
 import {
-    Plus, Search, Edit2, Trash2, X, Save, Phone, Mail,
+    Plus, Search, Edit2, Trash2, X, Save, Phone, Mail, Eye,
     ChevronLeft, ChevronsLeft, ChevronRight, ChevronsRight, Minus,
 } from "lucide-react";
-import { addNewVendorApi, updateVendorApi, deleteVendorApi } from "api/vendor-api";
+import { addNewVendorApi, updateVendorApi, deleteVendorApi, getVendorDetail, getAllVendorApi } from "api/vendor-api";
 import { getAllSocietyApi } from "api/society-api";
 import { getComplaintCategoriesApi } from "api/complaint-api";
 
 
 const safeText = (val) => {
-    if (val === null || val === undefined) return "-";
+    if (val === null || val === undefined || val === "") return "-";
     if (typeof val === "object") {
         return val.name || val.label || val.societyName || val.categoryName || "-";
     }
@@ -27,25 +27,10 @@ const safeId = (val) => {
 };
 
 
-const StatusBadge = ({ status }) => {
-    const statusStr = safeText(status);
-    const map = {
-        Active: { bg: "rgba(0,212,170,0.15)", color: "#00d4aa" },
-        Inactive: { bg: "rgba(255,107,107,0.15)", color: "#ff6b6b" },
-    };
-    const s = map[statusStr] || { bg: "rgba(136,153,170,0.15)", color: "#8899aa" };
-    return (
-        <span style={{ background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em" }}>
-            {statusStr || "Inactive"}
-        </span>
-    );
-};
-
-
 const Modal = ({ title, onClose, children }) => (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-strong)", borderRadius: 16, width: "100%", maxWidth: 900, maxHeight: "85vh", overflow: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
                 <h3 style={{ color: "var(--text-primary)", fontSize: 16, fontWeight: 600 }}>{title}</h3>
                 <button onClick={onClose} style={{ background: "none", border: "none", color: "#8899aa", cursor: "pointer" }}>
                     <X size={18} />
@@ -68,6 +53,19 @@ const FormField = ({ label, value, onChange, type = "text", required }) => (
             onChange={(e) => onChange(e.target.value)}
             style={{ width: "100%", background: "var(--bg-surface)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: "10px 12px", color: "var(--text-primary)", fontSize: 13, outline: "none" }}
         />
+    </div>
+);
+
+const DetailRow = ({ label, value }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+        <span style={{ color: "#8899aa", fontSize: 12, flexShrink: 0 }}>{label}</span>
+        <span style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 500, textAlign: "right", wordBreak: "break-word" }}>{value}</span>
+    </div>
+);
+
+const SectionTitle = ({ children }) => (
+    <div style={{ color: "#00d4aa", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 22, marginBottom: 8 }}>
+        {children}
     </div>
 );
 
@@ -105,7 +103,7 @@ const Pagination = ({ page, total, perPage, onChange }) => {
 
 
 const emptyForm = () => ({
-    vendorName: "", vendorAddress: "", gsting: "", pan: "", product: "",
+    vendorName: "", vendorAddress: "", gstin: "", pan: "", product: "",
     serviceType: "", frequency: "", contactPersonName: "", contactPersonNumber: "",
     contactValue: "", contractStartDate: "", contractEndDate: "",
     totalPeriodCalculation: 1, bankName: "", branchName: "", ifsc: "",
@@ -113,10 +111,10 @@ const emptyForm = () => ({
     societyRows: [{ societyIdentifier: "" }],
 });
 
-const btnStyle = (color, bg) => ({
+const btnStyle = (color, bg, disabled) => ({
     flex: 1, background: bg, border: "none", borderRadius: 8, padding: "8px",
-    color, cursor: "pointer", fontSize: 12, display: "flex",
-    alignItems: "center", justifyContent: "center", gap: 4,
+    color, cursor: disabled ? "not-allowed" : "pointer", fontSize: 12, display: "flex",
+    alignItems: "center", justifyContent: "center", gap: 4, opacity: disabled ? 0.5 : 1,
 });
 
 
@@ -131,7 +129,23 @@ export default function VendorMaster() {
     const [societies, setSocieties] = useState([]);
     const [categories, setCategories] = useState([]);
     const [form, setForm] = useState(emptyForm());
+    const [viewModal, setViewModal] = useState(null);
+    const [actionLoadingId, setActionLoadingId] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
     const PER = 8;
+
+    // ─── Fetch latest vendors from API and update local state ───────────────────
+    const fetchAllVendors = async () => {
+        try {
+            setRefreshing(true);
+            const res = await getAllVendorApi();
+            setData(res?.data?.data || res?.data || []);
+        } catch (err) {
+            console.error("Failed to refresh vendors:", err);
+        } finally {
+            setRefreshing(false);
+        }
+    };
 
     useEffect(() => {
         (async () => {
@@ -154,45 +168,89 @@ export default function VendorMaster() {
 
     const openAdd = () => { setForm(emptyForm()); setModal("add"); };
 
-    const openEdit = (v) => {
-        const existingSocieties = Array.isArray(v?.societies) ? v.societies : [];
-        setForm({
-            vendorName: cleanValue(v?.vendorName),
-            vendorAddress: cleanValue(v?.vendorAddress),
-            // gsting: cleanValue(v?.gsting),
-            pan: cleanValue(v?.pan),
-            gsting: cleanValue(v?.gsting) || cleanValue(v?.gstin) || cleanValue(v?.gstNumber) || "",
-            product: cleanValue(v?.product) || cleanValue(v?.productName) || "",
-            // product: cleanValue(v?.product),
-            serviceType: cleanValue(v?.serviceType),
-            frequency: cleanValue(v?.frequency),
-            contactPersonName: cleanValue(v?.contactPersonName),
-            contactPersonNumber: cleanValue(v?.contactPersonNumber),
-            contactValue: cleanValue(v?.contactValue),
-            contractStartDate: cleanValue(v?.contractStartDate),
-            contractEndDate: cleanValue(v?.contractEndDate),
-            totalPeriodCalculation: v?.totalPeriodCalculation || 1,
-            bankName: cleanValue(v?.bankName),
-            branchName: cleanValue(v?.branchName),
-            ifsc: cleanValue(v?.ifsc),
-            accountNumber: cleanValue(v?.accountNumber),
-            aadharNumber: cleanValue(v?.aadharNumber),
-            complaintCategoryId: safeId(v?.complaintCategoryId) || safeId(v?.complaintCategory),
-            societyRows: existingSocieties.length
-                ? existingSocieties.map((sid) => ({ societyIdentifier: safeId(sid) }))
-                : [{ societyIdentifier: "" }],
-            id: v?.id,
-            vendorIdentifier: v?.vendorIdentifier,
-        });
-        setModal("edit");
+    const fetchVendorDetail = async (identifier) => {
+        const res = await getVendorDetail(identifier);
+        return res?.data?.data || res?.data || null;
     };
 
-    const handleDelete = (id) => {
+    const openEdit = async (v) => {
+        const identifier = v?.vendorIdentifier;
+        if (!identifier) {
+            console.error("Missing vendorIdentifier for edit");
+            return;
+        }
+        setActionLoadingId(identifier);
         try {
-            deleteVendorApi(id);
-            setData((d) => (d || ctxVendors || []).filter((r) => r.id !== id));
+            const detail = await fetchVendorDetail(identifier);
+            const source = detail || v;
+            const existingSocieties = Array.isArray(source?.societies) ? source.societies : [];
+            setForm({
+                vendorName: cleanValue(source?.vendorName),
+                vendorAddress: cleanValue(source?.vendorAddress),
+                pan: cleanValue(source?.pan),
+                gstin: cleanValue(source?.gstin),
+                product: cleanValue(source?.product) || cleanValue(source?.productName) || "",
+                serviceType: cleanValue(source?.serviceType),
+                frequency: cleanValue(source?.frequency),
+                contactPersonName: cleanValue(source?.contactPersonName),
+                contactPersonNumber: cleanValue(source?.contactPersonNumber),
+                contactValue: cleanValue(source?.contactValue),
+                contractStartDate: cleanValue(source?.contractStartDate),
+                contractEndDate: cleanValue(source?.contractEndDate),
+                totalPeriodCalculation: source?.totalPeriodCalculation || 1,
+                bankName: cleanValue(source?.bankName),
+                branchName: cleanValue(source?.branchName),
+                ifsc: cleanValue(source?.ifsc),
+                accountNumber: cleanValue(source?.accountNumber),
+                aadharNumber: cleanValue(source?.aadharNumber),
+                complaintCategoryId: safeId(source?.complaintCategoryId) || safeId(source?.complaintCategory),
+                societyRows: existingSocieties.length
+                    ? existingSocieties.map((sid) => ({ societyIdentifier: safeId(sid) }))
+                    : [{ societyIdentifier: "" }],
+                id: source?.id || v?.id,
+                vendorIdentifier: source?.vendorIdentifier || identifier,
+            });
+            setModal("edit");
         } catch (err) {
             console.error(err);
+        } finally {
+            setActionLoadingId(null);
+        }
+    };
+
+    const openView = async (v) => {
+        const identifier = v?.vendorIdentifier;
+        if (!identifier) {
+            console.error("Missing vendorIdentifier for view");
+            return;
+        }
+        setActionLoadingId(identifier);
+        try {
+            const detail = await fetchVendorDetail(identifier);
+            setViewModal(detail || v);
+        } catch (err) {
+            console.error(err);
+            setViewModal(v);
+        } finally {
+            setActionLoadingId(null);
+        }
+    };
+
+    // ─── Delete: await API, then re-fetch latest list ───────────────────────────
+    const handleDelete = async (identifier) => {
+        if (!identifier) {
+            console.error("Missing vendorIdentifier for delete");
+            return;
+        }
+        if (!window.confirm("Are you sure you want to delete this vendor?")) return;
+        try {
+            setActionLoadingId(identifier);
+            await deleteVendorApi(identifier);
+            await fetchAllVendors(); // ← refresh latest data from server
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setActionLoadingId(null);
         }
     };
 
@@ -213,12 +271,12 @@ export default function VendorMaster() {
         });
     };
 
+    // ─── Save (Add / Edit): await API, then re-fetch latest list ────────────────
     const handleSave = async () => {
-        // ADD - full payload
         const addPayload = {
             vendorName: form.vendorName,
             vendorAddress: form.vendorAddress,
-            gsting: form.gsting,
+            gstin: form.gstin,
             pan: form.pan,
             product: form.product,
             serviceType: form.serviceType,
@@ -238,32 +296,36 @@ export default function VendorMaster() {
             societies: form.societyRows.map((r) => r.societyIdentifier).filter(Boolean),
         };
 
-        // EDIT - only these 6 fields as per Postman
         const editPayload = {
             vendorName: form.vendorName,
             vendorAddress: form.vendorAddress,
+            gstin: form.gstin,
+            pan: form.pan,
+            serviceType: form.serviceType,
+            frequency: form.frequency,
             contactPersonName: form.contactPersonName,
             contactPersonNumber: form.contactPersonNumber,
             contactValue: form.contactValue,
+            contractStartDate: form.contractStartDate,
+            contractEndDate: form.contractEndDate,
+            totalPeriodCalculation: Number(form.totalPeriodCalculation) || 1,
+            bankName: form.bankName,
+            branchName: form.branchName,
+            ifsc: form.ifsc,
+            accountNumber: form.accountNumber,
+            aadharNumber: form.aadharNumber,
+            complaintCategoryId: form.complaintCategoryId,
             societies: form.societyRows.map((r) => r.societyIdentifier).filter(Boolean),
         };
 
         try {
             setSaving(true);
-            let res;
             if (modal === "add") {
-                res = await addNewVendorApi(addPayload);
+                await addNewVendorApi(addPayload);
             } else {
-                res = await updateVendorApi(editPayload, form.vendorIdentifier);
+                await updateVendorApi(editPayload, form.vendorIdentifier);
             }
-            const newVendor = res?.data?.data || res?.data || {
-                ...(modal === "add" ? addPayload : editPayload),
-                id: form.id || Date.now(),
-                vendorIdentifier: form.vendorIdentifier || String(Date.now()),
-                status: "Active"
-            };
-            if (modal === "add") setData((d) => [newVendor, ...(d || ctxVendors || [])]);
-            else setData((d) => (d || ctxVendors || []).map((r) => (r.id === form.id ? { ...r, ...newVendor } : r)));
+            await fetchAllVendors(); // ← refresh latest data from server
             setModal(null);
         } catch (err) {
             console.error(err);
@@ -284,6 +346,7 @@ export default function VendorMaster() {
 
     return (
         <div>
+            {/* ── Header: Search + Add button ── */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 12 }}>
                 <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
                     <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#8899aa" }} />
@@ -299,58 +362,69 @@ export default function VendorMaster() {
                 </button>
             </div>
 
+            {/* ── Refreshing indicator ── */}
+            {refreshing && (
+                <div style={{ color: "#00d4aa", fontSize: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00d4aa", animation: "pulse 1s infinite" }} />
+                    Refreshing vendors...
+                </div>
+            )}
+
+            {/* ── Vendor Cards Grid ── */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px,1fr))", gap: 16 }}>
-                {paged.map((v) => (
-                    <div key={v.id || v.vendorIdentifier} style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                            <div>
-                                <div style={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 4 }}>{safeText(v.vendorName)}</div>
-                                <span style={{ background: "rgba(108,99,255,0.12)", color: "#6c63ff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 600 }}>
-                                    {safeText(v.product) !== "-" ? safeText(v.product) : "Vendor"}
-                                </span>
+                {paged.map((v) => {
+                    const isLoadingRow = actionLoadingId === v.vendorIdentifier;
+                    return (
+                        <div key={v.id || v.vendorIdentifier} style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                                <div>
+                                    <div style={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 4 }}>{safeText(v.vendorName)}</div>
+                                </div>
                             </div>
-                            <StatusBadge status={v.status} />
-                        </div>
 
-                        <div style={{ color: "#8899aa", fontSize: 12, lineHeight: 1.7, marginBottom: 14 }}>
-                            <div><Phone size={11} style={{ marginRight: 5, verticalAlign: "middle" }} />{safeText(v.contactPersonNumber)}</div>
-                            <div><Mail size={11} style={{ marginRight: 5, verticalAlign: "middle" }} />{safeText(v.contactPersonName)}</div>
-                            <div>Service: {safeText(v.serviceType)}</div>
-                            <div>Frequency: {safeText(v.frequency)}</div>
-                            <div>Address: {safeText(v.vendorAddress)}</div>
-                            <div>Category: {safeText(v.complaintCategory)}</div>
-                        </div>
+                            <div style={{ color: "#8899aa", fontSize: 12, lineHeight: 1.7, marginBottom: 14 }}>
+                                <div><Phone size={11} style={{ marginRight: 5, verticalAlign: "middle" }} />{safeText(v.contactPersonNumber)}</div>
+                                <div><Mail size={11} style={{ marginRight: 5, verticalAlign: "middle" }} />{safeText(v.contactPersonName)}</div>
+                                <div>Service: {safeText(v.serviceType)}</div>
+                                <div>Frequency: {safeText(v.frequency)}</div>
+                                <div>Address: {safeText(v.vendorAddress)}</div>
+                                <div>Category: {safeText(v.complaintCategory?.name || v.complaintCategory)}</div>
+                            </div>
 
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                            {getSocietiesArray(v).map((sid) => (
-                                <span key={sid} style={{ background: "rgba(0,212,170,0.12)", color: "#00d4aa", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600 }}>
-                                    {getSocietyName(sid)}
-                                </span>
-                            ))}
-                        </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                                {getSocietiesArray(v).map((sid) => (
+                                    <span key={sid} style={{ background: "rgba(0,212,170,0.12)", color: "#00d4aa", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 600 }}>
+                                        {getSocietyName(sid)}
+                                    </span>
+                                ))}
+                            </div>
 
-                        <div style={{ display: "flex", gap: 8 }}>
-                            <button onClick={() => openEdit(v)} style={btnStyle("#6c63ff", "rgba(108,99,255,0.12)")}>
-                                <Edit2 size={12} /> Edit
-                            </button>
-                            <button onClick={() => handleDelete(v.id)} style={btnStyle("#ff6b6b", "rgba(255,107,107,0.12)")}>
-                                <Trash2 size={12} /> Delete
-                            </button>
+                            <div style={{ display: "flex", gap: 8 }}>
+                                <button onClick={() => openView(v)} disabled={isLoadingRow} style={btnStyle("#00b4d8", "rgba(0,180,216,0.12)", isLoadingRow)}>
+                                    <Eye size={12} /> {isLoadingRow ? "..." : "View"}
+                                </button>
+                                <button onClick={() => openEdit(v)} disabled={isLoadingRow} style={btnStyle("#6c63ff", "rgba(108,99,255,0.12)", isLoadingRow)}>
+                                    <Edit2 size={12} /> {isLoadingRow ? "..." : "Edit"}
+                                </button>
+                                <button onClick={() => handleDelete(v.vendorIdentifier)} disabled={isLoadingRow} style={btnStyle("#ff6b6b", "rgba(255,107,107,0.12)", isLoadingRow)}>
+                                    <Trash2 size={12} /> {isLoadingRow ? "..." : "Delete"}
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             <Pagination page={page} total={filtered.length} perPage={PER} onChange={setPage} />
 
+            {/* ── Add / Edit Modal ── */}
             {modal && (
                 <Modal title={modal === "add" ? "Add Vendor" : "Edit Vendor"} onClose={() => setModal(null)}>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
                         <FormField label="Vendor Name" value={form.vendorName} onChange={(v) => setForm((f) => ({ ...f, vendorName: v }))} />
                         <FormField label="Vendor Address" value={form.vendorAddress} onChange={(v) => setForm((f) => ({ ...f, vendorAddress: v }))} />
-                        <FormField label="GSTIN" value={form.gsting} onChange={(v) => setForm((f) => ({ ...f, gsting: v }))} />
+                        <FormField label="GSTIN" value={form.gstin} onChange={(v) => setForm((f) => ({ ...f, gstin: v }))} />
                         <FormField label="PAN" value={form.pan} onChange={(v) => setForm((f) => ({ ...f, pan: v }))} />
-                        <FormField label="Product" value={form.product} onChange={(v) => setForm((f) => ({ ...f, product: v }))} />
                         <FormField label="Service Type" value={form.serviceType} onChange={(v) => setForm((f) => ({ ...f, serviceType: v }))} />
                         <FormField label="Frequency" value={form.frequency} onChange={(v) => setForm((f) => ({ ...f, frequency: v }))} />
                         <FormField label="Contact Person Name" value={form.contactPersonName} onChange={(v) => setForm((f) => ({ ...f, contactPersonName: v }))} />
@@ -379,6 +453,7 @@ export default function VendorMaster() {
                         </div>
                     </div>
 
+                    {/* Societies Section */}
                     <div style={{ marginTop: 18 }}>
                         <div style={{ color: "#8899aa", fontSize: 12, marginBottom: 10, fontWeight: 500 }}>Societies</div>
                         {form.societyRows.map((row, index) => (
@@ -414,6 +489,76 @@ export default function VendorMaster() {
                         <button onClick={() => setModal(null)} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 18px", color: "#8899aa", cursor: "pointer" }}>Cancel</button>
                         <button onClick={handleSave} disabled={saving} style={{ background: "linear-gradient(135deg,#00d4aa,#00b4d8)", border: "none", borderRadius: 8, padding: "9px 18px", color: "#0d1117", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, opacity: saving ? 0.7 : 1 }}>
                             <Save size={13} /> {saving ? "Saving..." : "Save"}
+                        </button>
+                    </div>
+                </Modal>
+            )}
+
+            {/* ── View Details Modal ── */}
+            {viewModal && (
+                <Modal title="Vendor Details" onClose={() => setViewModal(null)}>
+                    <SectionTitle>Vendor Information</SectionTitle>
+                    <DetailRow label="Vendor Name" value={safeText(viewModal.vendorName)} />
+                    <DetailRow label="Vendor Address" value={safeText(viewModal.vendorAddress)} />
+                    <DetailRow label="GSTIN" value={safeText(viewModal.gstin)} />
+                    <DetailRow label="PAN" value={safeText(viewModal.pan)} />
+                    <DetailRow label="Aadhar Number" value={safeText(viewModal.aadharNumber)} />
+                    <DetailRow label="Service Type" value={safeText(viewModal.serviceType)} />
+                    <DetailRow label="Frequency" value={safeText(viewModal.frequency)} />
+                    <DetailRow label="Contract Start Date" value={safeText(viewModal.contractStartDate)} />
+                    <DetailRow label="Contract End Date" value={safeText(viewModal.contractEndDate)} />
+                    <DetailRow label="Total Period Calculation" value={safeText(viewModal.totalPeriodCalculation)} />
+
+                    <SectionTitle>Contact Information</SectionTitle>
+                    <DetailRow label="Contact Person Name" value={safeText(viewModal.contactPersonName)} />
+                    <DetailRow label="Contact Person Number" value={safeText(viewModal.contactPersonNumber)} />
+                    <DetailRow label="Contact Value" value={safeText(viewModal.contactValue)} />
+
+                    <SectionTitle>Bank Details</SectionTitle>
+                    <DetailRow label="Bank Name" value={safeText(viewModal.bankName)} />
+                    <DetailRow label="Branch Name" value={safeText(viewModal.branchName)} />
+                    <DetailRow label="IFSC" value={safeText(viewModal.ifsc)} />
+                    <DetailRow label="Account Number" value={safeText(viewModal.accountNumber)} />
+
+                    <SectionTitle>Complaint Category</SectionTitle>
+                    <DetailRow
+                        label="Category"
+                        value={safeText(viewModal.complaintCategory?.name)}
+                    />
+
+                    <SectionTitle>
+                        Linked Societies ({Array.isArray(viewModal.societies) ? viewModal.societies.length : 0})
+                    </SectionTitle>
+                    {Array.isArray(viewModal.societies) && viewModal.societies.length > 0 ? (
+                        viewModal.societies.map((row, idx) => {
+                            const soc = row?.society || row;
+                            return (
+                                <div key={row?.societyIdentifier || idx} style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+                                    <div style={{ color: "var(--text-primary)", fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
+                                        {safeText(soc?.societyName)}
+                                    </div>
+                                    <DetailRow label="Email" value={safeText(soc?.email)} />
+                                    <DetailRow label="Contact Number" value={safeText(soc?.contactNumber)} />
+                                    <DetailRow label="Address" value={safeText(soc?.address)} />
+                                    <DetailRow label="City" value={safeText(soc?.city)} />
+                                    <DetailRow label="State" value={safeText(soc?.state)} />
+                                    <DetailRow label="Pincode" value={safeText(soc?.pincode)} />
+                                    <DetailRow label="Registration Number" value={safeText(soc?.registrationNumber)} />
+                                    <DetailRow label="Billing Frequency" value={safeText(soc?.billingFrequency)} />
+                                    <DetailRow label="Society GSTIN" value={safeText(soc?.gstin)} />
+                                    <DetailRow label="PAN Number" value={safeText(soc?.panNumber)} />
+                                    <DetailRow label="TAN Number" value={safeText(soc?.tanNumber)} />
+                                    <DetailRow label="HSN Code" value={safeText(soc?.hsnCode)} />
+                                </div>
+                            );
+                        })
+                    ) : (
+                        <div style={{ color: "#8899aa", fontSize: 13 }}>No societies linked.</div>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+                        <button onClick={() => setViewModal(null)} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 18px", color: "#8899aa", cursor: "pointer" }}>
+                            Close
                         </button>
                     </div>
                 </Modal>
